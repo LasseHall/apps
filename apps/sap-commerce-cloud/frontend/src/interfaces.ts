@@ -35,8 +35,14 @@ export interface ParameterDefinition {
    * - Symbol: Text
    * - List: List of texts
    * - Number: Integer
+   * - Select: Dropdown select
    */
-  type: 'Symbol' | 'List' | 'Number';
+  type: 'Symbol' | 'List' | 'Number' | 'Select';
+
+  /**
+   * Options for Select type parameters
+   */
+  options?: Array<{ label: string; value: string }>;
 
   /**
    * Whether it is possible without providing a value.
@@ -45,13 +51,15 @@ export interface ParameterDefinition {
 }
 
 export type AppParameters = {
-  apiEndpoint: string;
+  baseUrl: string;
+  apiVersion: string;
   baseSites: string;
 };
 
 export interface SAPParameters extends ParametersAPI<AppParameters, {}, {}> {
   installation: {
-    apiEndpoint: string;
+    baseUrl: string;
+    apiVersion: string;
     baseSites: string;
   };
 }
@@ -279,7 +287,8 @@ export interface ConfigurationParameters {
   projectKey?: string;
   clientId?: string;
   clientSecret?: string;
-  apiEndpoint?: string;
+  baseUrl?: string;
+  apiVersion?: string;
   authApiEndpoint?: string;
   locale?: string;
   fieldsConfig?: FieldsConfig;

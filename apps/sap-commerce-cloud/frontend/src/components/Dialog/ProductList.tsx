@@ -2,7 +2,7 @@ import { DialogAppSDK } from '@contentful/app-sdk';
 import { CheckBoxFn, Product } from '@interfaces';
 import { Checkbox, IconButton, TableCell, TableRow } from '@contentful/f36-components';
 import get from 'lodash/get';
-import { formatProductUrl } from '@utils';
+import { buildApiEndpoint, formatProductUrl } from '@utils';
 import { DoneIcon } from '@contentful/f36-icons';
 
 interface Props {
@@ -15,7 +15,9 @@ interface Props {
 
 export function ProductList({ sdk, products, selectedProducts, baseSite, checkboxFn }: Props) {
   const selectButtonClickEvent = (sku: string) => {
-    const apiEndpoint = get(sdk.parameters.invocation, 'apiEndpoint', '') as string;
+    const baseUrl = get(sdk.parameters.invocation, 'baseUrl', '') as string;
+    const apiVersion = get(sdk.parameters.invocation, 'apiVersion', '') as string;
+    const apiEndpoint = buildApiEndpoint(baseUrl, apiVersion);
     sdk.close([formatProductUrl(apiEndpoint, baseSite, sku)]);
   };
 

@@ -2,6 +2,7 @@ import { baseSiteTransformer } from './dataTransformers';
 import { SAPParameters } from '../interfaces';
 import { BaseAppSDK, CMAClient } from '@contentful/app-sdk';
 import { toHAAParams } from '../helpers/toHAAParams';
+import { buildApiEndpoint } from '../utils';
 
 export async function fetchBaseSitesHAA(ids: BaseAppSDK['ids'], cma: CMAClient): Promise<string[]> {
   const { response } = await cma.appActionCall.createWithResponse(
@@ -17,7 +18,9 @@ export async function fetchBaseSitesHAA(ids: BaseAppSDK['ids'], cma: CMAClient):
 
 export async function fetchBaseSites(parameters: SAPParameters): Promise<string[]> {
   try {
-    const url = `${parameters.installation.apiEndpoint}/occ/v2/basesites`;
+    const { baseUrl, apiVersion } = parameters.installation;
+    const apiEndpoint = buildApiEndpoint(baseUrl, apiVersion);
+    const url = `${apiEndpoint}/v2/basesites`;
     const response = await fetch(url);
     if (response.ok) {
       const responseJson = await response.json();

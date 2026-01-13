@@ -2,12 +2,16 @@ import difference from 'lodash.difference';
 import {
   baseSiteTransformer,
   productTransformer,
-} from '../../../frontend/src/api/dataTransformers';
+} from '../dataTransformers';
 import { AIR_HEADER, DEFAULT_FIELDS } from '../constants';
 import { BaseSites, Product, ProductList } from '../types';
 
 export class SapService {
-  constructor(readonly apiEndpoint: string) {}
+  constructor(
+    readonly apiEndpoint: string,
+    readonly baseUrl: string,
+    readonly apiVersion: string
+  ) {}
 
   public async getBaseSites(): Promise<string[]> {
     const url = `${this.apiEndpoint}/v2/basesites`;
@@ -38,7 +42,7 @@ export class SapService {
     const responseBody = await response.json();
     this.assertProductListResponse(responseBody);
     const products = responseBody['products'].map(
-      productTransformer({ apiEndpoint: this.apiEndpoint }, {}, baseSite)
+      productTransformer({ baseUrl: this.baseUrl, apiVersion: this.apiVersion }, {}, baseSite)
     );
     return { products, pagination: responseBody['pagination'] };
   }
@@ -72,7 +76,8 @@ export class SapService {
       const products: Product[] = totalProducts.map(
         productTransformer(
           {
-            apiEndpoint: this.apiEndpoint,
+            baseUrl: this.baseUrl,
+            apiVersion: this.apiVersion,
           },
           skuIdsToSkusMap
         )

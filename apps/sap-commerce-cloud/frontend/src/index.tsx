@@ -29,11 +29,23 @@ init(async (sdk) => {
             color="212F3F"
             parameterDefinitions={[
               {
-                id: 'apiEndpoint',
-                name: 'API Endpoint',
-                description: 'The API URL',
+                id: 'baseUrl',
+                name: 'Base URL',
+                description: 'The base URL of your SAP Commerce Cloud instance (without /occ or /rest)',
                 type: 'Symbol',
                 required: true,
+              },
+              {
+                id: 'apiVersion',
+                name: 'API Version',
+                description: 'Select the API version to use',
+                type: 'Select',
+                required: true,
+                default: 'occ',
+                options: [
+                  { label: 'OCC API', value: 'occ' },
+                  { label: 'REST API', value: 'rest' },
+                ],
               },
               {
                 id: 'baseSites',

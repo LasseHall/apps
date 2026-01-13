@@ -1,6 +1,5 @@
 import get from 'lodash/get';
-import { Product, Hash, ConfigurationParameters } from '../interfaces';
-import { buildApiEndpoint, getMediaBaseUrl } from '../utils';
+import { Product, Hash, ConfigurationParameters } from './types';
 
 export const productTransformer =
   (
@@ -13,10 +12,10 @@ export const productTransformer =
     let imageUrl = get(item, ['images', 0, 'url'], '');
     if (imageUrl.length > 0 && baseUrl) {
       // Media URLs use the base URL without /occ or /rest
-      imageUrl = getMediaBaseUrl(baseUrl) + imageUrl;
+      imageUrl = baseUrl + imageUrl;
     }
     const sku = get(item, ['code'], '');
-    const apiEndpoint = baseUrl && apiVersion ? buildApiEndpoint(baseUrl, apiVersion) : '';
+    const apiEndpoint = baseUrl && apiVersion ? `${baseUrl}/${apiVersion}` : '';
     const productUrl = skuIdsToSkusMap[sku]
       ? skuIdsToSkusMap[sku]
       : baseSite && apiEndpoint
@@ -47,7 +46,7 @@ export const productDetailsTransformer =
     let imageUrl = get(item, ['images', 0, 'url'], '');
     if (imageUrl.length > 0 && baseUrl) {
       // Media URLs use the base URL without /occ or /rest
-      imageUrl = getMediaBaseUrl(baseUrl) + imageUrl;
+      imageUrl = baseUrl + imageUrl;
     }
     return {
       id,

@@ -7,6 +7,7 @@ import {
   Heading,
   Note,
   Paragraph,
+  Select,
   TextInput,
   TextLink,
 } from '@contentful/f36-components';
@@ -111,7 +112,7 @@ export default function AppConfig({
     })();
   }, [sdk, parameterDefinitions]);
 
-  const onParameterChange = (key: string, e: ChangeEvent<HTMLInputElement>) => {
+  const onParameterChange = (key: string, e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { value } = e.currentTarget;
 
     setParameters((prevParameters) => ({
@@ -141,19 +142,39 @@ export default function AppConfig({
                 return (
                   <FormControl key={key} id={key}>
                     <FormControl.Label>{def.name}</FormControl.Label>
-                    <TextInput
-                      isRequired={def.required}
-                      id={key}
-                      name={key}
-                      maxLength={255}
-                      width={def.type === 'Symbol' ? 'large' : 'medium'}
-                      type={def.type === 'Symbol' ? 'text' : 'number'}
-                      value={parameters[def.id]}
-                      onChange={(e) =>
-                        onParameterChange(def.id, e as ChangeEvent<HTMLInputElement>)
-                      }
-                      aria-label={def.name}
-                    />
+                    {def.type === 'Select' ? (
+                      <Select
+                        isRequired={def.required}
+                        id={key}
+                        name={key}
+                        value={parameters[def.id]}
+                        onChange={(e) =>
+                          onParameterChange(def.id, e as ChangeEvent<HTMLSelectElement>)
+                        }
+                        aria-label={def.name}
+                      >
+                        {!def.default && <Select.Option value="">Select an option...</Select.Option>}
+                        {def.options?.map((option) => (
+                          <Select.Option key={option.value} value={option.value}>
+                            {option.label}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <TextInput
+                        isRequired={def.required}
+                        id={key}
+                        name={key}
+                        maxLength={255}
+                        width={def.type === 'Symbol' ? 'large' : 'medium'}
+                        type={def.type === 'Symbol' ? 'text' : 'number'}
+                        value={parameters[def.id]}
+                        onChange={(e) =>
+                          onParameterChange(def.id, e as ChangeEvent<HTMLInputElement>)
+                        }
+                        aria-label={def.name}
+                      />
+                    )}
                     <FormControl.HelpText>{def.description}</FormControl.HelpText>
                   </FormControl>
                 );

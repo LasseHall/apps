@@ -2,6 +2,7 @@ import { BaseAppSDK, CMAClient } from '@contentful/app-sdk';
 import { Response as ProductListResponse, SAPParameters, UpdateTotalPagesFn } from '../interfaces';
 import { productTransformer } from './dataTransformers';
 import { toHAAParams } from '../helpers/toHAAParams';
+import { buildApiEndpoint } from '../utils';
 
 export type FetchProductListParams = {
   baseSite: string;
@@ -65,9 +66,11 @@ export async function fetchProductList({
       errors: [],
     };
   }
+  const { baseUrl, apiVersion } = parameters.installation;
+  const apiEndpoint = buildApiEndpoint(baseUrl, apiVersion);
   const url =
-    parameters.installation.apiEndpoint +
-    '/occ/v2/' +
+    apiEndpoint +
+    '/v2/' +
     baseSite +
     '/products/search' +
     '?query=' +

@@ -1,0 +1,17 @@
+{
+  "name": "@contentful/sap-commerce-cloud-functions",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@contentful/node-apps-toolkit": "^2.6.0",
+    "contentful-management": "^11.3.0",
+    "lodash.difference": "^4.5.0",
+    "lodash.get": "^4.4.2"
+  },
+  "devDependencies": {
+    "@types/lodash.difference": "^4.5.9",
+    "@types/lodash.get": "^4.4.9",
+    "typescript": "^5.1.6"
+  }
+}

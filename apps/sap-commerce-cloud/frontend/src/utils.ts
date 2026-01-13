@@ -18,6 +18,25 @@ export const mapSort = <T extends Product, K extends keyof T>(
 };
 
 /**
+ * Constructs the full API endpoint from base URL and API version
+ * @param baseUrl - The base URL (e.g., https://api.example.ondemand.com)
+ * @param apiVersion - The API version (e.g., 'occ' or 'rest')
+ * @returns Full API endpoint URL
+ */
+export const buildApiEndpoint = (baseUrl: string, apiVersion: string): string => {
+  return `${baseUrl}/${apiVersion}`;
+};
+
+/**
+ * Gets the base URL for media (without /occ or /rest suffix)
+ * @param baseUrl - The base URL
+ * @returns Base URL for media endpoints
+ */
+export const getMediaBaseUrl = (baseUrl: string): string => {
+  return baseUrl;
+};
+
+/**
  * Formats the product url saved to the field for the given sku
  * @param sku
  * @param apiEndpoint
@@ -25,5 +44,5 @@ export const mapSort = <T extends Product, K extends keyof T>(
  * @returns string
  */
 export const formatProductUrl = (apiEndpoint: string, baseSite: string, sku: string): string => {
-  return `${apiEndpoint}/occ/v2/${baseSite}/products/${sku}`;
+  return `${apiEndpoint}/v2/${baseSite}/products/${sku}`;
 };

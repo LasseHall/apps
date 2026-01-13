@@ -22,7 +22,7 @@ import { useSDK } from '@contentful/react-apps-toolkit';
 import { cx } from '@emotion/css';
 import useAPI from '@hooks/useAPI';
 import { Error as ErrorType, Product, SAPParameters } from '@interfaces';
-import { formatProductUrl } from '@utils';
+import { buildApiEndpoint, formatProductUrl } from '@utils';
 import get from 'lodash/get';
 import union from 'lodash/union';
 import { ChangeEvent, useCallback, useEffect, useState } from 'react';
@@ -94,7 +94,9 @@ export default function Dialog() {
 
     if (event.target.checked) {
       if (!updatedProducts.includes(skuId)) {
-        const apiEndpoint = `${get(sdk.parameters.invocation, 'apiEndpoint', '')}`;
+        const baseUrl = get(sdk.parameters.invocation, 'baseUrl', '') as string;
+        const apiVersion = get(sdk.parameters.invocation, 'apiVersion', '') as string;
+        const apiEndpoint = buildApiEndpoint(baseUrl, apiVersion);
         updatedProducts.push(formatProductUrl(apiEndpoint, baseSite, skuId));
       }
     } else {
