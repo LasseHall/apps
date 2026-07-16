@@ -5,6 +5,8 @@ export type TargetSpaceAllowlistEntry = {
   name: string;
 };
 
+export type LocaleCopyMode = 'defaultOnly' | 'all' | 'custom';
+
 export type AppParameters = {
   cloneText: string;
   cloneTextBefore: boolean;
@@ -12,6 +14,8 @@ export type AppParameters = {
   allowedTargetSpaceIds?: TargetSpaceAllowlistEntry[];
   maxConcurrentRequests?: number;
   existingResourceBehavior?: 'overwrite' | 'skip';
+  localeCopyMode?: LocaleCopyMode;
+  customLocales?: string[];
 };
 
 export type SpaceOption = {
@@ -19,8 +23,15 @@ export type SpaceOption = {
   name: string;
 };
 
+export type LocaleOption = {
+  code: string;
+  name: string;
+  default: boolean;
+};
+
 export type CopyDialogResult = {
   targetSpaceId: string;
   selectedEntryIds: string[];
   selectedAssetIds: string[];
+  selectedLocales: string[];
 };
