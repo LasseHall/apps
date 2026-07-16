@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Checkbox,
+  EntityStatusBadge,
   Flex,
   FormControl,
   Heading,
@@ -24,7 +25,6 @@ import {
   CloneReferenceNode,
   collectUniqueNodeIds,
   EntryContentTypeInfo,
-  EntryPublishStatus,
 } from '../utils/ReferenceGraph';
 import { CopyDialogResult, LocaleOption, SpaceOption } from '@/vite-env';
 import packageJson from '../../package.json';
@@ -96,13 +96,6 @@ const styles = {
   }),
 };
 
-function formatStatusLabel(status?: EntryPublishStatus): string | undefined {
-  if (!status) return undefined;
-  if (status === 'draft') return 'Draft';
-  if (status === 'changed') return 'Changed';
-  return 'Published';
-}
-
 function toggleNodeSelection(
   node: CloneReferenceNode,
   nextChecked: boolean,
@@ -147,11 +140,9 @@ function TreeNode({
   const displayTitle =
     node.type === 'entry' ? parseContentTypeFromLabel(node.label).title : node.label;
   const contentTypeLabel = formatContentTypeLabel(node, entryContentTypes);
-  const statusLabel = formatStatusLabel(node.status);
 
   const subtitleParts: string[] = [];
   if (isRoot) subtitleParts.push('Root entry');
-  if (statusLabel) subtitleParts.push(statusLabel);
   if (node.type === 'asset') subtitleParts.push('Asset');
   else if (contentTypeLabel !== '—') subtitleParts.push(contentTypeLabel);
   subtitleParts.push(node.id);
@@ -165,7 +156,10 @@ function TreeNode({
           onChange={(event) => onToggle(node, event.target.checked)}
         />
         <Box minWidth={0}>
-          <Text fontWeight="fontWeightMedium">{displayTitle}</Text>
+          <Flex alignItems="center" gap="spacingXs" flexWrap="wrap">
+            <Text fontWeight="fontWeightMedium">{displayTitle}</Text>
+            {node.status && <EntityStatusBadge entityStatus={node.status} />}
+          </Flex>
           <Text fontColor="gray600" fontSize="fontSizeS">
             {subtitleParts.join(' · ')}
           </Text>
