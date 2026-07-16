@@ -5,6 +5,7 @@ import { SidebarAppSDK } from '@contentful/app-sdk';
 import { CopyDialogResult } from '@/vite-env';
 import { CrossSpaceCopier } from '../utils/CrossSpaceCopier';
 import { getSourceContext, listOrganizationSpaces } from '../utils/CmaClients';
+import { getSourceLocales, resolveDefaultSelectedLocales } from '../utils/localeUtils';
 import { useInstallationParameters } from '../utils/useInstallationParameters';
 
 function Sidebar() {
@@ -68,7 +69,9 @@ function Sidebar() {
       setLinksUpdated(progress.linksUpdated);
     });
 
-    const referenceTree = await copier.getReferenceTree();
+    const { referenceTree, entryContentTypes } = await copier.getReferenceSelectionData();
+    const sourceLocales = await getSourceLocales(source);
+    const initialSelectedLocales = resolveDefaultSelectedLocales(parameters, sourceLocales);
     const spaces = await listOrganizationSpaces(
       source.client,
       sdk.ids.organization,
@@ -84,18 +87,29 @@ function Sidebar() {
       return;
     }
 
+    if (initialSelectedLocales.length === 0) {
+      setIsPreparing(false);
+      setCopyError('No source locales are available to copy.');
+      return;
+    }
+
     const dialogResult = (await sdk.dialogs.openCurrentApp({
       title: 'Copy to another space',
-      width: 'large',
+      width: 'fullWidth',
+      minHeight: '70vh',
+      allowHeightOverflow: true,
       shouldCloseOnEscapePress: true,
       shouldCloseOnOverlayClick: false,
       parameters: {
         referenceTree,
         spaces,
+        entryContentTypes,
+        sourceLocales,
+        initialSelectedLocales,
       },
     })) as CopyDialogResult | null;
 
-    if (!dialogResult?.targetSpaceId) {
+    if (!dialogResult?.targetSpaceId || !dialogResult.selectedLocales?.length) {
       resetState();
       return;
     }
@@ -107,18 +121,14 @@ function Sidebar() {
       const result = await copier.copyToSpace(
         dialogResult.targetSpaceId,
         dialogResult.selectedEntryIds,
-        dialogResult.selectedAssetIds
+        dialogResult.selectedAssetIds,
+        dialogResult.selectedLocales
       );
 
       const targetSpaceName =
         spaces.find((space) => space.id === result.targetSpaceId)?.name ?? result.targetSpaceId;
 
       const warnings: string[] = [...result.warnings];
-      if (result.strippedLinkCount > 0) {
-        warnings.push(
-          `${result.strippedLinkCount} deselected reference link(s) were removed in the target copy.`
-        );
-      }
       if (result.failedUpdateIds.length > 0) {
         warnings.push(
           `${result.failedUpdateIds.length} copied ${result.failedUpdateIds.length === 1 ? 'entry' : 'entries'} could not have all links updated.`

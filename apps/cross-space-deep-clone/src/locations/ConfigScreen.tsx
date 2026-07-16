@@ -12,40 +12,63 @@ import {
   Switch,
   Button,
   Text,
+  Checkbox,
 } from '@contentful/f36-components';
 import { useSDK } from '@contentful/react-apps-toolkit';
-import { AppParameters, TargetSpaceAllowlistEntry } from '@/vite-env';
+import { AppParameters, LocaleCopyMode, LocaleOption, TargetSpaceAllowlistEntry } from '@/vite-env';
 import { ConfigAppSDK } from '@contentful/app-sdk';
 import { styles } from './ConfigScreen.styles';
 import ContentTypeMultiSelect, { ContentType } from '../components/ContentTypeMultiSelect';
+import { createPlainClient } from '../utils/CmaClients';
+import { DEFAULT_INSTALLATION_PARAMETERS } from '../utils/useInstallationParameters';
 
 function ConfigScreen() {
   const [parameters, setParameters] = useState<AppParameters>({
-    cloneText: 'Copy',
-    cloneTextBefore: true,
-    automaticRedirect: false,
-    maxConcurrentRequests: 5,
-    existingResourceBehavior: 'overwrite',
+    ...DEFAULT_INSTALLATION_PARAMETERS,
     allowedTargetSpaceIds: [],
   });
   const [selectedContentTypes, setSelectedContentTypes] = useState<ContentType[]>([]);
   const [newSpaceId, setNewSpaceId] = useState('');
   const [newSpaceName, setNewSpaceName] = useState('');
+  const [sourceLocales, setSourceLocales] = useState<LocaleOption[]>([]);
   const sdk = useSDK<ConfigAppSDK>();
 
   useEffect(() => {
     (async () => {
       const currentParameters = (await sdk.app.getParameters()) as AppParameters | null;
       if (currentParameters) {
-        setParameters({ ...parameters, ...currentParameters });
+        setParameters({ ...DEFAULT_INSTALLATION_PARAMETERS, ...currentParameters });
       }
+
+      try {
+        const client = createPlainClient(sdk);
+        const response = await client.locale.getMany({
+          spaceId: sdk.ids.space,
+          environmentId: sdk.ids.environmentAlias ?? sdk.ids.environment,
+        });
+        setSourceLocales(
+          response.items
+            .map((locale) => ({
+              code: locale.code,
+              name: locale.name,
+              default: Boolean(locale.default),
+            }))
+            .sort((a, b) => {
+              if (a.default === b.default) return a.code.localeCompare(b.code);
+              return a.default ? -1 : 1;
+            })
+        );
+      } catch (error) {
+        console.warn('Could not load source locales for config', error);
+      }
+
       sdk.app.setReady();
     })();
   }, [sdk]);
 
   const onConfigure = useCallback(async () => {
-    if (!parameters.cloneText?.trim()) {
-      sdk.notifier.error('The app configuration was not saved. Please provide clone text.');
+    if (parameters.localeCopyMode === 'custom' && (parameters.customLocales ?? []).length === 0) {
+      sdk.notifier.error('Select at least one locale for custom locale copy defaults.');
       return false;
     }
 
@@ -60,7 +83,10 @@ function ConfigScreen() {
     );
 
     return {
-      parameters,
+      parameters: {
+        ...parameters,
+        cloneText: parameters.cloneText?.trim() ?? '',
+      },
       targetState: { EditorInterface: { ...editorInterface } },
     };
   }, [parameters, selectedContentTypes, sdk]);
@@ -86,12 +112,25 @@ function ConfigScreen() {
   const removeAllowlistEntry = (spaceId: string) => {
     setParameters({
       ...parameters,
-      allowedTargetSpaceIds: (parameters.allowedTargetSpaceIds ?? []).filter((entry) => entry.id !== spaceId),
+      allowedTargetSpaceIds: (parameters.allowedTargetSpaceIds ?? []).filter(
+        (entry) => entry.id !== spaceId
+      ),
+    });
+  };
+
+  const toggleCustomLocale = (code: string, checked: boolean) => {
+    const current = new Set(parameters.customLocales ?? []);
+    if (checked) current.add(code);
+    else current.delete(code);
+    setParameters({
+      ...parameters,
+      customLocales: [...current],
     });
   };
 
   return (
-    <Flex flexDirection="column" gap="spacing2Xl">
+    <Box className={styles.page}>
+      <Flex className={styles.content} flexDirection="column" gap="spacing2Xl">
       <Box>
         <Heading>Set up Cross-Space Deep Clone</Heading>
         <Paragraph marginTop="spacingS">
@@ -113,18 +152,19 @@ function ConfigScreen() {
       <Box>
         <Subheading marginBottom="spacingM">Naming</Subheading>
         <FormControl>
-          <FormControl.Label className={styles.textInputLabel}>Clone text</FormControl.Label>
+          <FormControl.Label className={styles.textInputLabel}>Clone text (optional)</FormControl.Label>
           <TextInput
             value={parameters.cloneText}
             onChange={(event) => setParameters({ ...parameters, cloneText: event.target.value })}
+            placeholder="Leave empty to keep original titles"
           />
           <FormControl.HelpText>
-            This text is added before or after the copied entry title in the target space.
+            Optional prefix or suffix for copied entry titles. Leave blank to keep titles unchanged.
           </FormControl.HelpText>
         </FormControl>
         <FormControl marginTop="spacingM">
           <FormControl.Label className={styles.textInputLabel}>
-            Display clone text before or after the copied entry name?
+            If clone text is set, display it before or after the entry name?
           </FormControl.Label>
           <Radio.Group
             name="cloneTextBefore"
@@ -136,6 +176,50 @@ function ConfigScreen() {
             <Radio value="after">After</Radio>
           </Radio.Group>
         </FormControl>
+      </Box>
+
+      <Box>
+        <Subheading marginBottom="spacingM">Locales</Subheading>
+        <FormControl>
+          <FormControl.Label>
+            Default locales to copy (editors can change this in the copy dialog)
+          </FormControl.Label>
+          <Radio.Group
+            name="localeCopyMode"
+            value={parameters.localeCopyMode ?? 'defaultOnly'}
+            onChange={(event) =>
+              setParameters({
+                ...parameters,
+                localeCopyMode: event.target.value as LocaleCopyMode,
+              })
+            }>
+            <Radio value="defaultOnly">Source default locale only</Radio>
+            <Radio value="all">All source locales</Radio>
+            <Radio value="custom">Custom locale set</Radio>
+          </Radio.Group>
+          <FormControl.HelpText>
+            For HQ → market pushes, default locale only keeps market localization intact.
+          </FormControl.HelpText>
+        </FormControl>
+        {parameters.localeCopyMode === 'custom' && (
+          <Stack spacing="spacingXs" marginTop="spacingM">
+            {sourceLocales.length === 0 ? (
+              <Text fontColor="gray600">
+                Could not load locales. Save custom locale codes after they appear, or switch mode.
+              </Text>
+            ) : (
+              sourceLocales.map((locale) => (
+                <Checkbox
+                  key={locale.code}
+                  isChecked={(parameters.customLocales ?? []).includes(locale.code)}
+                  onChange={(event) => toggleCustomLocale(locale.code, event.target.checked)}>
+                  {locale.name} ({locale.code})
+                  {locale.default ? ' — default' : ''}
+                </Checkbox>
+              ))
+            )}
+          </Stack>
+        )}
       </Box>
 
       <Box>
@@ -192,7 +276,7 @@ function ConfigScreen() {
             <Radio value="skip">Skip — leave existing content unchanged</Radio>
           </Radio.Group>
           <FormControl.HelpText>
-            Overwrite is recommended while testing repeated copies with stable IDs.
+            Overwrite merges selected locales into existing entries and preserves other locales.
           </FormControl.HelpText>
         </FormControl>
       </Box>
@@ -229,7 +313,8 @@ function ConfigScreen() {
           </Switch>
         </FormControl>
       </Box>
-    </Flex>
+      </Flex>
+    </Box>
   );
 }
 

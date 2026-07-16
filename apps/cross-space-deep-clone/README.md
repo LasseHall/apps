@@ -5,10 +5,18 @@ A custom Contentful app forked from the [Deep Clone marketplace app](https://www
 ## Features
 
 - Copy from the entry sidebar to another org space (`master` only in v1)
-- Review a reference tree containing linked entries **and** assets before copying
-- Selectively include or exclude linked content
+- Review a nested reference tree of linked entries **and** assets before copying
+- Show source Draft / Changed / Published status on each tree node
+- Selectively include or exclude linked content (deselected references **keep** their links by ID)
+- Preserve entry and asset IDs across spaces (`createWithId`)
+- Skip or overwrite when a resource already exists in the target (configurable; default overwrite)
+- Choose which locales to copy (config default + per-run dialog picker)
+  - Create: selected locales only
+  - Update/overwrite: merge selected locales onto existing target fields (other locales left intact)
 - Clone assets into the target space (re-upload files and rewrite asset links)
-- Preflight checks for missing content types and locale mismatches
+- Keep rich text embed shells; rewrite mapped IDs, leave unmapped as source IDs
+- Optional title clone text (prefix/suffix); leave empty to keep original titles
+- Preflight checks for missing content types, locales, and deselected dangling links
 - Optional target-space allowlist and configurable API concurrency
 
 ## Requirements
@@ -32,7 +40,11 @@ Install the app in Contentful:
 1. Run `npm run create-app-definition` and follow the prompts
 2. Assign the app to your source space
 3. Open the app configuration screen and assign sidebar locations to your page content types
-4. Optionally configure a target-space allowlist
+4. Optionally configure:
+   - Target-space allowlist
+   - Default locales to copy
+   - Skip vs overwrite for existing resources
+   - Optional clone-text prefix/suffix
 
 Build and upload:
 
@@ -45,11 +57,11 @@ npm run upload
 
 1. Open an entry in a configured content type
 2. Click **Copy to another space** in the sidebar
-3. Choose the destination space
-4. Review the reference tree and deselect anything you do not want copied
+3. Choose the destination space and locales to copy
+4. Review the reference tree (status badges included) and deselect anything you do not want copied
 5. Confirm the copy
 
-Deselected entry/asset links are removed in the target copy and reported as warnings.
+Deselected entry/asset links are **kept by source ID** in the target copy (assumed to already exist there) and reported as warnings. Copies are created or updated as drafts (not auto-published).
 
 ## Cross-space permissions spike
 
@@ -80,17 +92,19 @@ npm run build
 
 - `src/utils/ReferenceGraph.ts` — source-space reference traversal (entries + assets)
 - `src/utils/AssetCopier.ts` — asset download/upload/create/process in target space
-- `src/utils/EntryCopier.ts` — entry create + link rewrite in target space
+- `src/utils/EntryCopier.ts` — entry create/update + link rewrite in target space
 - `src/utils/CrossSpaceCopier.ts` — orchestration and preflight
+- `src/utils/localeUtils.ts` — locale defaults, filtering, and merge-on-update
 - `src/locations/Sidebar.tsx` — user flow entry point
-- `src/locations/ReferenceSelectionDialog.tsx` — target space picker + selection tree
+- `src/locations/ReferenceSelectionDialog.tsx` — target space, locales, and selection tree
+- `src/locations/ConfigScreen.tsx` — installation parameters and sidebar assignment
 
 ## Limitations (v1)
 
 - Target environment is fixed to `master`
 - No content-type/field mapping
-- Copies are created as drafts (not auto-published)
-- No deduplication by slug or unique fields
+- Copies remain drafts (not auto-published)
+- No deduplication by slug or unique fields (identity is same ID across spaces)
 - Cross-space `ResourceLink` fields are not copied (detected/ignored during traversal)
 
 ## License

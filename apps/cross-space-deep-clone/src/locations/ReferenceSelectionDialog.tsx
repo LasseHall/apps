@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DialogAppSDK } from '@contentful/app-sdk';
 import { useAutoResizer, useSDK } from '@contentful/react-apps-toolkit';
 import {
@@ -10,38 +10,80 @@ import {
   Heading,
   Note,
   Paragraph,
-  Stack,
   Text,
 } from '@contentful/f36-components';
 import { css } from '@emotion/css';
 import SpaceSelect from '../components/SpaceSelect';
-import { CloneReferenceNode } from '../utils/ReferenceGraph';
-import { CopyDialogResult, SpaceOption } from '@/vite-env';
+import {
+  collectEntryIdsFromTree,
+  fetchEntryContentTypes,
+  formatContentTypeLabel,
+  parseContentTypeFromLabel,
+} from '../utils/entryContentTypes';
+import {
+  CloneReferenceNode,
+  collectUniqueNodeIds,
+  EntryContentTypeInfo,
+  EntryPublishStatus,
+} from '../utils/ReferenceGraph';
+import { CopyDialogResult, LocaleOption, SpaceOption } from '@/vite-env';
+import packageJson from '../../package.json';
 
 type DialogInvocationParameters = {
   referenceTree: CloneReferenceNode;
   spaces: SpaceOption[];
+  entryContentTypes?: Record<string, EntryContentTypeInfo>;
+  sourceLocales: LocaleOption[];
+  initialSelectedLocales: string[];
 };
 
 const styles = {
   root: css({
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '100vh',
+    width: '100%',
+    minHeight: '100%',
     backgroundColor: '#ffffff',
   }),
   header: css({
-    padding: '24px 24px 16px',
+    padding: '20px 32px 16px',
     borderBottom: '1px solid #e5ebf1',
   }),
   content: css({
     flex: 1,
-    padding: '20px 24px',
+    padding: '20px 32px',
     overflowY: 'auto',
+    width: '100%',
   }),
   controls: css({
-    padding: '16px 24px 24px',
+    padding: '16px 32px 24px',
     borderTop: '1px solid #e5ebf1',
+    backgroundColor: '#ffffff',
+  }),
+  targetRow: css({
+    display: 'grid',
+    gridTemplateColumns: 'minmax(280px, 420px) minmax(280px, 1fr)',
+    gap: '24px',
+    alignItems: 'start',
+    marginBottom: '20px',
+    '@media (max-width: 900px)': {
+      gridTemplateColumns: '1fr',
+    },
+  }),
+  localeList: css({
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    maxHeight: '160px',
+    overflowY: 'auto',
+    padding: '8px 0',
+  }),
+  treePanel: css({
+    border: '1px solid #e5ebf1',
+    borderRadius: '6px',
+    padding: '16px',
+    overflow: 'auto',
+    maxHeight: 'min(62vh, 680px)',
     backgroundColor: '#ffffff',
   }),
   treeChildren: css({
@@ -49,19 +91,16 @@ const styles = {
     paddingLeft: '12px',
     borderLeft: '1px solid #d3dce6',
   }),
+  treeNode: css({
+    marginBottom: '8px',
+  }),
 };
 
-function collectNodeIds(node: CloneReferenceNode): { entryIds: string[]; assetIds: string[] } {
-  const entryIds = node.type === 'entry' ? [node.id] : [];
-  const assetIds = node.type === 'asset' ? [node.id] : [];
-
-  for (const child of node.children) {
-    const childIds = collectNodeIds(child);
-    entryIds.push(...childIds.entryIds);
-    assetIds.push(...childIds.assetIds);
-  }
-
-  return { entryIds, assetIds };
+function formatStatusLabel(status?: EntryPublishStatus): string | undefined {
+  if (!status) return undefined;
+  if (status === 'draft') return 'Draft';
+  if (status === 'changed') return 'Changed';
+  return 'Published';
 }
 
 function toggleNodeSelection(
@@ -72,7 +111,7 @@ function toggleNodeSelection(
 ): { entries: Set<string>; assets: Set<string> } {
   const nextSelectedEntryIds = new Set(selectedEntryIds);
   const nextSelectedAssetIds = new Set(selectedAssetIds);
-  const { entryIds, assetIds } = collectNodeIds(node);
+  const { entryIds, assetIds } = collectUniqueNodeIds(node);
 
   for (const entryId of entryIds) {
     if (nextChecked) nextSelectedEntryIds.add(entryId);
@@ -92,30 +131,43 @@ function TreeNode({
   selectedEntryIds,
   selectedAssetIds,
   rootEntryId,
+  entryContentTypes,
   onToggle,
 }: {
   node: CloneReferenceNode;
   selectedEntryIds: Set<string>;
   selectedAssetIds: Set<string>;
   rootEntryId: string;
+  entryContentTypes: Record<string, EntryContentTypeInfo>;
   onToggle: (node: CloneReferenceNode, checked: boolean) => void;
 }) {
   const isRoot = node.type === 'entry' && node.id === rootEntryId;
   const isChecked =
     node.type === 'entry' ? selectedEntryIds.has(node.id) : selectedAssetIds.has(node.id);
+  const displayTitle =
+    node.type === 'entry' ? parseContentTypeFromLabel(node.label).title : node.label;
+  const contentTypeLabel = formatContentTypeLabel(node, entryContentTypes);
+  const statusLabel = formatStatusLabel(node.status);
+
+  const subtitleParts: string[] = [];
+  if (isRoot) subtitleParts.push('Root entry');
+  if (statusLabel) subtitleParts.push(statusLabel);
+  if (node.type === 'asset') subtitleParts.push('Asset');
+  else if (contentTypeLabel !== '—') subtitleParts.push(contentTypeLabel);
+  subtitleParts.push(node.id);
 
   return (
-    <Box marginBottom="spacingS">
+    <Box className={styles.treeNode}>
       <Flex alignItems="flex-start" gap="spacingS">
         <Checkbox
           isChecked={isChecked}
           isDisabled={isRoot}
           onChange={(event) => onToggle(node, event.target.checked)}
         />
-        <Box>
-          <Text fontWeight="fontWeightMedium">{node.label}</Text>
+        <Box minWidth={0}>
+          <Text fontWeight="fontWeightMedium">{displayTitle}</Text>
           <Text fontColor="gray600" fontSize="fontSizeS">
-            {isRoot ? 'Root entry' : `${node.type === 'asset' ? 'Asset' : 'Entry'} · ${node.id}`}
+            {subtitleParts.join(' · ')}
           </Text>
         </Box>
       </Flex>
@@ -129,6 +181,7 @@ function TreeNode({
               selectedEntryIds={selectedEntryIds}
               selectedAssetIds={selectedAssetIds}
               rootEntryId={rootEntryId}
+              entryContentTypes={entryContentTypes}
               onToggle={onToggle}
             />
           ))}
@@ -143,22 +196,49 @@ function ReferenceSelectionDialog() {
   const invocationParameters = sdk.parameters.invocation as DialogInvocationParameters;
   const referenceTree = invocationParameters.referenceTree;
   const spaces = invocationParameters.spaces;
+  const sourceLocales = invocationParameters.sourceLocales ?? [];
+  const passedEntryContentTypes = invocationParameters.entryContentTypes ?? {};
   useAutoResizer();
 
-  const allIds = useMemo(() => collectNodeIds(referenceTree), [referenceTree]);
+  const [entryContentTypes, setEntryContentTypes] =
+    useState<Record<string, EntryContentTypeInfo>>(passedEntryContentTypes);
+  const [isLoadingContentTypes, setIsLoadingContentTypes] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setIsLoadingContentTypes(true);
+      const fetched = await fetchEntryContentTypes(sdk, collectEntryIdsFromTree(referenceTree));
+      if (cancelled) return;
+
+      setEntryContentTypes({ ...passedEntryContentTypes, ...fetched });
+      setIsLoadingContentTypes(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [referenceTree, sdk]);
+
+  const { entryIds: uniqueEntryIds, assetIds: uniqueAssetIds } = useMemo(
+    () => collectUniqueNodeIds(referenceTree),
+    [referenceTree]
+  );
   const rootEntryId = referenceTree.id;
 
-  const [step, setStep] = useState<1 | 2>(1);
-  const [targetSpaceId, setTargetSpaceId] = useState('');
-  const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(new Set(allIds.entryIds));
-  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set(allIds.assetIds));
+  const [targetSpaceId, setTargetSpaceId] = useState(spaces.length === 1 ? (spaces[0]?.id ?? '') : '');
+  const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(() => new Set(uniqueEntryIds));
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(() => new Set(uniqueAssetIds));
+  const [selectedLocales, setSelectedLocales] = useState<Set<string>>(
+    () => new Set(invocationParameters.initialSelectedLocales ?? [])
+  );
 
+  const selectableEntryCount = [...uniqueEntryIds].filter((id) => id !== rootEntryId).length;
+  const totalReferenceCount = selectableEntryCount + uniqueAssetIds.size;
   const selectedReferenceCount =
     [...selectedEntryIds].filter((id) => id !== rootEntryId).length + selectedAssetIds.size;
-  const totalReferenceCount =
-    allIds.entryIds.filter((id) => id !== rootEntryId).length + allIds.assetIds.length;
-  const allReferencesSelected =
-    selectedReferenceCount === totalReferenceCount && selectedAssetIds.size === allIds.assetIds.length;
+  const allReferencesSelected = selectedReferenceCount === totalReferenceCount;
 
   const handleToggleNode = (node: CloneReferenceNode, checked: boolean) => {
     const nextSelection = toggleNodeSelection(node, checked, selectedEntryIds, selectedAssetIds);
@@ -172,24 +252,29 @@ function ReferenceSelectionDialog() {
       setSelectedAssetIds(new Set());
       return;
     }
-    setSelectedEntryIds(new Set(allIds.entryIds));
-    setSelectedAssetIds(new Set(allIds.assetIds));
+    setSelectedEntryIds(new Set(uniqueEntryIds));
+    setSelectedAssetIds(new Set(uniqueAssetIds));
+  };
+
+  const toggleLocale = (code: string, checked: boolean) => {
+    const next = new Set(selectedLocales);
+    if (checked) next.add(code);
+    else next.delete(code);
+    setSelectedLocales(next);
   };
 
   const handleCancel = () => {
     sdk.close(null);
   };
 
-  const handleContinue = () => {
-    if (!targetSpaceId) return;
-    setStep(2);
-  };
-
   const handleConfirm = () => {
+    if (!targetSpaceId || selectedLocales.size === 0) return;
+
     const result: CopyDialogResult = {
       targetSpaceId,
       selectedEntryIds: Array.from(selectedEntryIds),
       selectedAssetIds: Array.from(selectedAssetIds),
+      selectedLocales: Array.from(selectedLocales),
     };
     sdk.close(result);
   };
@@ -197,70 +282,93 @@ function ReferenceSelectionDialog() {
   return (
     <Box className={styles.root}>
       <Box className={styles.header}>
-        <Heading>{step === 1 ? 'Choose target space' : 'Select content to copy'}</Heading>
-        <Paragraph marginTop="spacingS">
-          {step === 1
-            ? 'Pick the destination space. Entries and assets will be copied into its master environment.'
-            : 'Review the reference tree and deselect any linked entries or assets you do not want copied.'}
-        </Paragraph>
+        <Flex justifyContent="space-between" alignItems="flex-start" gap="spacingM">
+          <Box>
+            <Heading>Select content to copy</Heading>
+            <Paragraph marginTop="spacingS">
+              Choose target space and locales, review linked entries and assets, and deselect
+              anything you do not want copied. Deselected references keep their links by ID.
+            </Paragraph>
+          </Box>
+          <Text fontColor="gray500" fontSize="fontSizeS">
+            Cross-Space Deep Clone v{packageJson.version}
+          </Text>
+        </Flex>
       </Box>
 
       <Box className={styles.content}>
-        {step === 1 ? (
-          <Stack spacing="spacingM">
-            <SpaceSelect spaces={spaces} selectedSpaceId={targetSpaceId} onChange={setTargetSpaceId} />
-            <FormControl>
-              <FormControl.Label>Target environment</FormControl.Label>
-              <FormControl.HelpText>Fixed to master for v1.</FormControl.HelpText>
-            </FormControl>
-          </Stack>
-        ) : (
-          <Stack spacing="spacingM">
-            <Note variant="primary">
-              Target space: {spaces.find((space) => space.id === targetSpaceId)?.name ?? targetSpaceId}{' '}
-              · master
-            </Note>
-            <Note>
-              Deselected references will be removed from the copied entries in the target space.
-            </Note>
-            <Flex justifyContent="space-between" alignItems="center">
-              <Text fontColor="gray700">
-                {`Selected ${selectedReferenceCount} of ${totalReferenceCount} referenced item(s)`}
+        <Box className={styles.targetRow}>
+          <SpaceSelect spaces={spaces} selectedSpaceId={targetSpaceId} onChange={setTargetSpaceId} />
+          <FormControl>
+            <FormControl.Label>Locales to copy</FormControl.Label>
+            <Box className={styles.localeList}>
+              {sourceLocales.map((locale) => (
+                <Checkbox
+                  key={locale.code}
+                  isChecked={selectedLocales.has(locale.code)}
+                  onChange={(event) => toggleLocale(locale.code, event.target.checked)}>
+                  {locale.name} ({locale.code})
+                  {locale.default ? ' — default' : ''}
+                </Checkbox>
+              ))}
+            </Box>
+            <FormControl.HelpText>
+              Only selected locales are written. Other locales already on the target stay unchanged.
+              Target environment is always master.
+            </FormControl.HelpText>
+          </FormControl>
+        </Box>
+
+        <Box marginBottom="spacingM">
+          <Note>
+            Deselected references are not copied, but their links are kept by ID so existing target
+            entries remain linked.
+          </Note>
+        </Box>
+
+        <Flex justifyContent="space-between" alignItems="center" marginBottom="spacingM" gap="spacingM">
+          <Box>
+            <Text fontColor="gray700">
+              {allReferencesSelected
+                ? `All ${totalReferenceCount} linked reference${totalReferenceCount === 1 ? '' : 's'} selected`
+                : `${selectedReferenceCount} of ${totalReferenceCount} linked reference${
+                    totalReferenceCount === 1 ? '' : 's'
+                  } selected`}
+            </Text>
+            {isLoadingContentTypes && (
+              <Text fontColor="gray600" fontSize="fontSizeS">
+                Loading content types…
               </Text>
-              <Button size="small" variant="transparent" onClick={handleToggleAllReferences}>
-                {allReferencesSelected ? 'Deselect all references' : 'Select all references'}
-              </Button>
-            </Flex>
-            <TreeNode
-              node={referenceTree}
-              selectedEntryIds={selectedEntryIds}
-              selectedAssetIds={selectedAssetIds}
-              rootEntryId={rootEntryId}
-              onToggle={handleToggleNode}
-            />
-          </Stack>
-        )}
+            )}
+          </Box>
+          <Button size="small" variant="secondary" onClick={handleToggleAllReferences}>
+            {allReferencesSelected ? 'Deselect all references' : 'Select all references'}
+          </Button>
+        </Flex>
+
+        <Box className={styles.treePanel}>
+          <TreeNode
+            node={referenceTree}
+            selectedEntryIds={selectedEntryIds}
+            selectedAssetIds={selectedAssetIds}
+            rootEntryId={rootEntryId}
+            entryContentTypes={entryContentTypes}
+            onToggle={handleToggleNode}
+          />
+        </Box>
       </Box>
 
       <Box className={styles.controls}>
-        <Flex justifyContent="space-between">
+        <Flex justifyContent="space-between" alignItems="center">
           <Button variant="secondary" onClick={handleCancel}>
             Cancel
           </Button>
-          {step === 1 ? (
-            <Button variant="positive" isDisabled={!targetSpaceId} onClick={handleContinue}>
-              Continue
-            </Button>
-          ) : (
-            <Flex gap="spacingS">
-              <Button variant="secondary" onClick={() => setStep(1)}>
-                Back
-              </Button>
-              <Button variant="positive" onClick={handleConfirm}>
-                Copy selected content
-              </Button>
-            </Flex>
-          )}
+          <Button
+            variant="positive"
+            isDisabled={!targetSpaceId || selectedLocales.size === 0}
+            onClick={handleConfirm}>
+            Copy selected content
+          </Button>
         </Flex>
       </Box>
     </Box>

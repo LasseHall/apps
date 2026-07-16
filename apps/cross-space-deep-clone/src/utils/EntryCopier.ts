@@ -2,9 +2,10 @@ import { ContentTypeProps, CreateEntryProps, EntryProps } from 'contentful-manag
 import { SpaceContext } from './CmaClients';
 import { formatCopyResourceError } from './cmaErrors';
 import { mapWithConcurrency } from './concurrency';
+import { ExistingResourceBehavior, getIfExists } from './existingResource';
+import { filterFieldsToLocales, mergeLocalizedFields } from './localeUtils';
 import { deepClone, isAssetLink, isEntryLink, isObject, isResourceLink } from './linkUtils';
 import { AssetIdMap } from './AssetCopier';
-import { ExistingResourceBehavior, getIfExists } from './existingResource';
 import {
   isRichTextDocument,
   rewriteRichTextDocument,
@@ -25,7 +26,6 @@ export class EntryCopier {
   private failedCloneIds: string[] = [];
   private failedUpdateIds: string[] = [];
   private copyFailureMessages: string[] = [];
-  private strippedLinkCount = 0;
   private unmappedRichTextEmbeds: string[] = [];
   private skippedEntryIds = new Set<string>();
   private contentTypes: Record<string, ContentTypeProps> = {};
@@ -37,15 +37,12 @@ export class EntryCopier {
     private readonly cloneTextBefore: boolean,
     private readonly concurrency: number,
     private readonly existingResourceBehavior: ExistingResourceBehavior = 'overwrite',
+    private readonly selectedLocales: string[] = [],
     private readonly onProgress?: (progress: EntryCopyProgress) => void
   ) {}
 
   getFailedUpdateIds(): string[] {
     return this.failedUpdateIds;
-  }
-
-  getStrippedLinkCount(): number {
-    return this.strippedLinkCount;
   }
 
   getUnmappedRichTextEmbeds(): string[] {
@@ -95,7 +92,8 @@ export class EntryCopier {
         }
 
         const fields = await this.getFieldsForCreate(sourceEntry);
-        const strippedFields = this.stripLinksForCreate(fields);
+        const localizedFields = filterFieldsToLocales(fields, this.selectedLocales);
+        const strippedFields = this.stripLinksForCreate(localizedFields);
 
         const createProps: CreateEntryProps = {
           fields: strippedFields,
@@ -155,12 +153,19 @@ export class EntryCopier {
       const sourceEntry = this.sourceEntries[sourceEntryId];
       if (!sourceEntry) return;
 
-      const fields = await this.getFieldsForCreate(sourceEntry);
-      this.applyMappedLinks(fields, entryIdMap, assetIdMap);
+      const sourceFields = await this.getFieldsForCreate(sourceEntry);
+      this.applyMappedLinks(sourceFields, entryIdMap, assetIdMap);
+      const localizedSourceFields = filterFieldsToLocales(sourceFields, this.selectedLocales);
 
       let latestClone = clone;
       for (let retryCount = 0; retryCount < 3; retryCount++) {
         try {
+          const mergedFields = mergeLocalizedFields(
+            latestClone.fields,
+            localizedSourceFields,
+            this.selectedLocales
+          );
+
           const updated = await this.target.client.entry.update(
             {
               spaceId: this.target.spaceId,
@@ -169,7 +174,7 @@ export class EntryCopier {
             },
             {
               sys: { ...latestClone.sys, version: latestClone.sys.version },
-              fields,
+              fields: mergedFields,
             }
           );
           this.clones[sourceEntryId] = updated;
@@ -214,9 +219,6 @@ export class EntryCopier {
         }
 
         this.rewriteLinksOnField(fieldValue, entryIdMap, assetIdMap);
-        if (this.shouldRemoveUnmappedLink(fieldValue, entryIdMap, assetIdMap)) {
-          delete field[locale];
-        }
       }
     }
   }
@@ -238,7 +240,7 @@ export class EntryCopier {
         fieldValue.sys.id = mappedId;
         return true;
       }
-      this.strippedLinkCount += 1;
+      // Keep deselected / unmapped links by source ID.
       return false;
     }
 
@@ -248,7 +250,6 @@ export class EntryCopier {
         fieldValue.sys.id = mappedId;
         return true;
       }
-      this.strippedLinkCount += 1;
       return false;
     }
 
@@ -258,26 +259,14 @@ export class EntryCopier {
 
     if (Array.isArray(fieldValue)) {
       let didUpdate = false;
-      const nextValues = fieldValue
-        .map((value) => {
-          const clonedValue = deepClone(value);
-          if (this.rewriteLinksOnField(clonedValue, entryIdMap, assetIdMap)) {
-            didUpdate = true;
-            return clonedValue;
-          }
-          if (this.shouldRemoveUnmappedLink(value, entryIdMap, assetIdMap)) {
-            this.strippedLinkCount += 1;
-            return null;
-          }
-          return value;
-        })
-        .filter((value) => value !== null);
-
-      if (nextValues.length !== fieldValue.length) {
-        fieldValue.splice(0, fieldValue.length, ...nextValues);
-        didUpdate = true;
+      for (let index = 0; index < fieldValue.length; index += 1) {
+        const value = fieldValue[index];
+        const clonedValue = deepClone(value);
+        if (this.rewriteLinksOnField(clonedValue, entryIdMap, assetIdMap)) {
+          fieldValue[index] = clonedValue;
+          didUpdate = true;
+        }
       }
-
       return didUpdate;
     }
 
@@ -288,11 +277,8 @@ export class EntryCopier {
           didUpdate = true;
           continue;
         }
-        if (this.shouldRemoveUnmappedLink(value, entryIdMap, assetIdMap)) {
-          delete fieldValue[key];
-          this.strippedLinkCount += 1;
-          didUpdate = true;
-        }
+        // Keep unmapped links in place.
+        void key;
       }
       return didUpdate;
     }
@@ -300,24 +286,10 @@ export class EntryCopier {
     return false;
   }
 
-  private shouldRemoveUnmappedLink(
-    fieldValue: unknown,
-    entryIdMap: EntryIdMap,
-    assetIdMap: AssetIdMap
-  ): boolean {
-    if (isEntryLink(fieldValue)) {
-      return !entryIdMap[fieldValue.sys.id];
-    }
-    if (isAssetLink(fieldValue)) {
-      return !assetIdMap[fieldValue.sys.id];
-    }
-    return false;
-  }
-
   private stripLinksForCreate(fields: EntryProps['fields']): EntryProps['fields'] {
     const clonedFields = deepClone(fields);
     this.removeAllLinks(clonedFields);
-    this.strippedLinkCount += stripEmbedsFromRichTextFields(clonedFields);
+    stripEmbedsFromRichTextFields(clonedFields);
     return clonedFields;
   }
 
@@ -360,15 +332,20 @@ export class EntryCopier {
     const contentTypeId = entry.sys.contentType.sys.id;
     const contentType = await this.getContentType(contentTypeId);
     const titleField = contentType.fields.find((field) => field.id === contentType.displayField);
+    const selected = new Set(this.selectedLocales);
 
     if (titleField && entryFields[titleField.id]) {
       const titleFieldValues = entryFields[titleField.id];
-      for (const locale in titleFieldValues) {
-        const title = titleFieldValues[locale];
-        if (typeof title !== 'string') continue;
-        titleFieldValues[locale] = this.cloneTextBefore
-          ? `${this.cloneText} ${title}`
-          : `${title} ${this.cloneText}`;
+      const cloneText = this.cloneText.trim();
+      if (cloneText) {
+        for (const locale in titleFieldValues) {
+          if (selected.size > 0 && !selected.has(locale)) continue;
+          const title = titleFieldValues[locale];
+          if (typeof title !== 'string') continue;
+          titleFieldValues[locale] = this.cloneTextBefore
+            ? `${cloneText} ${title}`
+            : `${title} ${cloneText}`;
+        }
       }
     }
 

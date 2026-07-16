@@ -14,7 +14,8 @@ export type PreflightResult = {
 
 export async function runPreflight(
   target: SpaceContext,
-  graphData: ReferenceGraphData
+  graphData: ReferenceGraphData,
+  selectedLocales?: string[]
 ): Promise<PreflightResult> {
   const issues: PreflightIssue[] = [];
   const contentTypeIds = new Set<string>();
@@ -59,11 +60,17 @@ export async function runPreflight(
     const targetLocaleCodes = new Set(targetLocales.items.map((locale) => locale.code));
 
     const sourceLocaleCodes = new Set<string>();
-    for (const entry of Object.values(graphData.entries)) {
-      for (const field of Object.values(entry.fields)) {
-        if (!field) continue;
-        for (const locale of Object.keys(field)) {
-          sourceLocaleCodes.add(locale);
+    if (selectedLocales && selectedLocales.length > 0) {
+      for (const locale of selectedLocales) {
+        sourceLocaleCodes.add(locale);
+      }
+    } else {
+      for (const entry of Object.values(graphData.entries)) {
+        for (const field of Object.values(entry.fields)) {
+          if (!field) continue;
+          for (const locale of Object.keys(field)) {
+            sourceLocaleCodes.add(locale);
+          }
         }
       }
     }
@@ -72,7 +79,7 @@ export async function runPreflight(
     if (missingLocales.length > 0) {
       issues.push({
         level: 'warning',
-        message: `Some source locales are not configured in target space: ${missingLocales.join(', ')}. Only overlapping locales will copy cleanly.`,
+        message: `Selected locales are not configured in target space: ${missingLocales.join(', ')}. Those locales will not copy cleanly.`,
       });
     }
   } catch (_error) {
@@ -90,7 +97,7 @@ export async function runPreflight(
     if (danglingLinks > 0) {
       issues.push({
         level: 'warning',
-        message: `Entry "${entry.sys.id}" references ${danglingLinks} deselected item(s). Those links will be removed in the target copy.`,
+        message: `Entry "${entry.sys.id}" references ${danglingLinks} deselected item(s). Those links will be kept by ID (assumed to already exist in the target).`,
       });
       break;
     }

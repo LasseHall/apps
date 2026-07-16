@@ -18,7 +18,6 @@ export type CrossSpaceCopyProgress = {
 export type CrossSpaceCopyResult = {
   rootEntry: EntryProps;
   targetSpaceId: string;
-  strippedLinkCount: number;
   failedUpdateIds: string[];
   warnings: string[];
 };
@@ -34,7 +33,10 @@ export class CrossSpaceCopier {
     private readonly onProgress?: (progress: CrossSpaceCopyProgress) => void
   ) {}
 
-  async getReferenceTree() {
+  async getReferenceSelectionData(): Promise<{
+    referenceTree: Awaited<ReturnType<ReferenceGraph['build']>>;
+    entryContentTypes: ReturnType<ReferenceGraph['getEntryContentTypes']>;
+  }> {
     this.graph = new ReferenceGraph(this.source, this.rootEntryId, (count) => {
       this.onProgress?.({
         referencesFound: count,
@@ -45,13 +47,23 @@ export class CrossSpaceCopier {
         linksUpdated: 0,
       });
     });
-    return this.graph.build();
+    const referenceTree = await this.graph.build();
+    return {
+      referenceTree,
+      entryContentTypes: this.graph.getEntryContentTypes(),
+    };
+  }
+
+  async getReferenceTree() {
+    const { referenceTree } = await this.getReferenceSelectionData();
+    return referenceTree;
   }
 
   async copyToSpace(
     targetSpaceId: string,
     selectedEntryIds: string[],
-    selectedAssetIds: string[]
+    selectedAssetIds: string[],
+    selectedLocales: string[]
   ): Promise<CrossSpaceCopyResult> {
     if (!this.graph) {
       await this.getReferenceTree();
@@ -66,7 +78,7 @@ export class CrossSpaceCopier {
     const concurrency = this.parameters.maxConcurrentRequests ?? 5;
     const existingResourceBehavior = this.parameters.existingResourceBehavior ?? 'overwrite';
 
-    const preflight = await runPreflight(target, this.graphData);
+    const preflight = await runPreflight(target, this.graphData, selectedLocales);
     if (!preflight.ok) {
       const message = preflight.issues
         .filter((issue) => issue.level === 'error')
@@ -83,16 +95,18 @@ export class CrossSpaceCopier {
       target,
       concurrency,
       existingResourceBehavior,
+      selectedLocales,
       ({ completed, total }) => {
-      this.onProgress?.({
-        referencesFound: this.graph?.getReferenceCount() ?? 0,
-        assetsCopied: completed,
-        assetsTotal: total,
-        entriesCreated: 0,
-        entriesTotal: Object.keys(this.graphData!.entries).length,
-        linksUpdated: 0,
-      });
-    });
+        this.onProgress?.({
+          referencesFound: this.graph?.getReferenceCount() ?? 0,
+          assetsCopied: completed,
+          assetsTotal: total,
+          entriesCreated: 0,
+          entriesTotal: Object.keys(this.graphData!.entries).length,
+          linksUpdated: 0,
+        });
+      }
+    );
 
     const assetIdMap = await assetCopier.copyAssets(this.graphData.assets);
 
@@ -106,6 +120,7 @@ export class CrossSpaceCopier {
       this.parameters.cloneTextBefore,
       concurrency,
       existingResourceBehavior,
+      selectedLocales,
       ({ created, updated, total }) => {
         this.onProgress?.({
           referencesFound: this.graph?.getReferenceCount() ?? 0,
@@ -138,7 +153,6 @@ export class CrossSpaceCopier {
     return {
       rootEntry,
       targetSpaceId,
-      strippedLinkCount: entryCopier.getStrippedLinkCount(),
       failedUpdateIds: entryCopier.getFailedUpdateIds(),
       warnings,
     };

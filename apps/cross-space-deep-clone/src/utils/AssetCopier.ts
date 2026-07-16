@@ -2,6 +2,7 @@ import { AssetProps } from 'contentful-management';
 import { SpaceContext } from './CmaClients';
 import { mapWithConcurrency } from './concurrency';
 import { ExistingResourceBehavior, getIfExists } from './existingResource';
+import { filterLocalizedMap, mergeLocalizedFields } from './localeUtils';
 import { normalizeAssetUrl } from './linkUtils';
 
 export type AssetIdMap = Record<string, string>;
@@ -37,6 +38,7 @@ export class AssetCopier {
     private readonly target: SpaceContext,
     private readonly concurrency: number,
     private readonly existingResourceBehavior: ExistingResourceBehavior = 'overwrite',
+    private readonly selectedLocales: string[] = [],
     private readonly onProgress?: (progress: AssetCopyProgress) => void
   ) {}
 
@@ -95,15 +97,27 @@ export class AssetCopier {
       return assetId;
     }
 
-    const title = sourceAsset.fields.title;
-    const description = sourceAsset.fields.description;
     const fileField = await this.buildFileFieldFromSource(sourceAsset);
+    const title =
+      filterLocalizedMap(sourceAsset.fields.title, this.selectedLocales) ??
+      (Object.keys(fileField).length > 0
+        ? { [Object.keys(fileField)[0]!]: fileDetailsFallbackTitle(sourceAsset.fields.file!) }
+        : undefined);
+    const description = filterLocalizedMap(sourceAsset.fields.description, this.selectedLocales);
 
-    const assetFields = {
-      title: title ?? { 'en-US': fileDetailsFallbackTitle(sourceAsset.fields.file!) },
+    const sourceAssetFields = {
+      ...(title ? { title } : {}),
       ...(description ? { description } : {}),
       file: fileField,
     };
+
+    const assetFields = existing
+      ? mergeLocalizedFields(existing.fields, sourceAssetFields, this.selectedLocales)
+      : sourceAssetFields;
+
+    if (!assetFields.file || Object.keys(assetFields.file).length === 0) {
+      throw new Error(`Asset ${assetId} has no file locales to copy for the selected locales`);
+    }
 
     const asset = existing
       ? await this.target.client.asset.update(
@@ -114,7 +128,7 @@ export class AssetCopier {
           },
           {
             sys: { ...existing.sys, version: existing.sys.version },
-            fields: assetFields,
+            fields: assetFields as AssetProps['fields'],
             ...(sourceAsset.metadata ? { metadata: sourceAsset.metadata } : {}),
           }
         )
@@ -125,18 +139,26 @@ export class AssetCopier {
             assetId,
           },
           {
-            fields: assetFields,
+            fields: assetFields as AssetProps['fields'],
             ...(sourceAsset.metadata ? { metadata: sourceAsset.metadata } : {}),
           }
         );
 
-    const processedAsset = await this.target.client.asset.processForAllLocales(
-      {
-        spaceId: this.target.spaceId,
-        environmentId: this.target.environmentId,
-      },
-      asset
-    );
+    const localesToProcess = Object.keys(fileField);
+    let processedAsset = asset;
+
+    if (localesToProcess.length > 0) {
+      for (const locale of localesToProcess) {
+        processedAsset = await this.target.client.asset.processForLocale(
+          {
+            spaceId: this.target.spaceId,
+            environmentId: this.target.environmentId,
+          },
+          processedAsset,
+          locale
+        );
+      }
+    }
 
     return processedAsset.sys.id;
   }
@@ -150,9 +172,12 @@ export class AssetCopier {
       throw new Error(`Asset ${sourceAsset.sys.id} has no file field`);
     }
 
+    const selected = new Set(this.selectedLocales);
     const fileField: NonNullable<AssetProps['fields']['file']> = {};
 
     for (const locale of Object.keys(sourceFileField)) {
+      if (selected.size > 0 && !selected.has(locale)) continue;
+
       const fileDetails = sourceFileField[locale];
       if (!fileDetails?.url) continue;
 
@@ -176,7 +201,7 @@ export class AssetCopier {
     }
 
     if (Object.keys(fileField).length === 0) {
-      throw new Error(`Asset ${sourceAsset.sys.id} has no downloadable file URLs`);
+      throw new Error(`Asset ${sourceAsset.sys.id} has no downloadable file URLs for selected locales`);
     }
 
     return fileField;

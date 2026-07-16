@@ -60,50 +60,63 @@ describe('AssetCopier', () => {
           }
           return asset;
         }),
-        createWithId: vi.fn(async ({ assetId }: { assetId: string }) =>
-          getMockAsset(assetId, 'Hero')
-        ),
+        createWithId: vi.fn(async ({ assetId }: { assetId: string }, payload: { fields: unknown }) => ({
+          ...getMockAsset(assetId, 'Hero'),
+          fields: payload.fields as ReturnType<typeof getMockAsset>['fields'],
+        })),
         update: vi.fn(async (_params: unknown, payload: { fields: unknown; sys: { version: number } }) => ({
           ...getMockAsset('asset-source', 'Hero'),
           fields: payload.fields as ReturnType<typeof getMockAsset>['fields'],
           sys: { ...getMockAsset('asset-source', 'Hero').sys, version: payload.sys.version + 1 },
         })),
+        processForLocale: vi.fn(async (_params: unknown, asset: ReturnType<typeof getMockAsset>) => asset),
         processForAllLocales: vi.fn(async (_params: unknown, asset: ReturnType<typeof getMockAsset>) => asset),
       },
     };
   }
 
-  it('downloads, uploads, and creates assets in the target space', async () => {
+  it('downloads, uploads, and creates assets for selected locales only', async () => {
     const sourceAsset = getMockAsset('asset-source', 'Hero');
-    const targetClient = buildTargetClient();
+    sourceAsset.fields.title = {
+      'en-US': 'Hero',
+      'sv-SE': 'Hjalte',
+    };
+    sourceAsset.fields.file = {
+      'en-US': sourceAsset.fields.file!['en-US']!,
+      'sv-SE': {
+        ...sourceAsset.fields.file!['en-US']!,
+        fileName: 'hero-sv.jpg',
+      },
+    };
 
+    const targetClient = buildTargetClient();
     const target: SpaceContext = {
       spaceId: 'target-space',
       environmentId: 'master',
       client: targetClient as unknown as SpaceContext['client'],
     };
 
-    const copier = new AssetCopier(target, 2);
+    const copier = new AssetCopier(target, 2, 'overwrite', ['en-US']);
     const idMap = await copier.copyAssets({ 'asset-source': sourceAsset });
 
     expect(idMap['asset-source']).toBe('asset-source');
     expect(targetClient.upload.create).toHaveBeenCalledOnce();
     expect(targetClient.asset.createWithId).toHaveBeenCalledOnce();
-    expect(targetClient.asset.createWithId).toHaveBeenCalledWith(
-      expect.objectContaining({ assetId: 'asset-source' }),
-      expect.any(Object)
-    );
     const createPayload = targetClient.asset.createWithId.mock.calls[0]?.[1] as {
-      fields: { file: Record<string, Record<string, unknown>> };
+      fields: { title: Record<string, string>; file: Record<string, unknown> };
     };
-    expect(createPayload.fields.file['en-US']).not.toHaveProperty('details');
-    expect(createPayload.fields.file['en-US']).not.toHaveProperty('url');
-    expect(targetClient.asset.processForAllLocales).toHaveBeenCalledOnce();
+    expect(createPayload.fields.title).toEqual({ 'en-US': 'Hero' });
+    expect(Object.keys(createPayload.fields.file)).toEqual(['en-US']);
+    expect(targetClient.asset.processForLocale).toHaveBeenCalledOnce();
   });
 
-  it('updates existing assets when overwrite behavior is enabled', async () => {
+  it('updates existing assets for selected locales and preserves others', async () => {
     const sourceAsset = getMockAsset('asset-source', 'Hero');
     const existingAsset = getMockAsset('asset-source', 'Old hero');
+    existingAsset.fields.title = {
+      'en-US': 'Old hero',
+      'sv-SE': 'Market title',
+    };
     const targetClient = buildTargetClient({ 'asset-source': existingAsset });
 
     const target: SpaceContext = {
@@ -112,12 +125,16 @@ describe('AssetCopier', () => {
       client: targetClient as unknown as SpaceContext['client'],
     };
 
-    const copier = new AssetCopier(target, 2, 'overwrite');
+    const copier = new AssetCopier(target, 2, 'overwrite', ['en-US']);
     await copier.copyAssets({ 'asset-source': sourceAsset });
 
     expect(targetClient.asset.createWithId).not.toHaveBeenCalled();
     expect(targetClient.asset.update).toHaveBeenCalledOnce();
-    expect(copier.getSkippedAssetIds()).toEqual([]);
+    const updatePayload = targetClient.asset.update.mock.calls[0]?.[1] as {
+      fields: { title: Record<string, string> };
+    };
+    expect(updatePayload.fields.title['en-US']).toBe('Hero');
+    expect(updatePayload.fields.title['sv-SE']).toBe('Market title');
   });
 
   it('skips existing assets when skip behavior is enabled', async () => {
@@ -131,7 +148,7 @@ describe('AssetCopier', () => {
       client: targetClient as unknown as SpaceContext['client'],
     };
 
-    const copier = new AssetCopier(target, 2, 'skip');
+    const copier = new AssetCopier(target, 2, 'skip', ['en-US']);
     await copier.copyAssets({ 'asset-source': sourceAsset });
 
     expect(targetClient.asset.createWithId).not.toHaveBeenCalled();

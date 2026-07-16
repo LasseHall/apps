@@ -15,7 +15,7 @@ function buildEntryCopierClient(
       })),
     },
     entry: {
-      createWithId: vi.fn(async ({ entryId }: { entryId: string }) => {
+      createWithId: vi.fn(async ({ entryId }: { entryId: string }, payload: { fields: unknown }) => {
         const entry = {
           ...getMockEntry(entryId, {}),
           sys: {
@@ -23,23 +23,26 @@ function buildEntryCopierClient(
             id: entryId,
             version: 1,
           },
-          fields: {},
+          fields: payload.fields as Record<string, Record<string, unknown>>,
         };
         createdEntries[entryId] = entry;
         return entry;
       }),
-      update: vi.fn(async (_params: unknown, payload: { fields: unknown; sys: { version: number } }) => {
-        const entryId = Object.keys(createdEntries).find((id) => createdEntries[id]?.sys.version === payload.sys.version);
-        const resolvedEntryId = entryId ?? 'root-source';
-        const existing = createdEntries[resolvedEntryId] ?? getMockEntry(resolvedEntryId, {});
-        const updated = {
-          ...existing,
-          fields: payload.fields as Record<string, Record<string, unknown>>,
-          sys: { ...existing.sys, version: existing.sys.version + 1 },
-        };
-        createdEntries[resolvedEntryId] = updated;
-        return updated;
-      }),
+      update: vi.fn(
+        async (
+          { entryId }: { entryId: string },
+          payload: { fields: unknown; sys: { version: number } }
+        ) => {
+          const existing = createdEntries[entryId] ?? getMockEntry(entryId, {});
+          const updated = {
+            ...existing,
+            fields: payload.fields as Record<string, Record<string, unknown>>,
+            sys: { ...existing.sys, version: payload.sys.version + 1 },
+          };
+          createdEntries[entryId] = updated;
+          return updated;
+        }
+      ),
       get: vi.fn(async ({ entryId }: { entryId: string }) => {
         const entry = createdEntries[entryId];
         if (!entry) {
@@ -52,12 +55,12 @@ function buildEntryCopierClient(
 }
 
 describe('EntryCopier', () => {
-  it('creates entries without source links and rewrites mapped links on update', async () => {
+  it('creates entries with selected locales only and keeps deselected links on update', async () => {
     const childSource = getMockEntry('child-source', {
-      title: { 'en-US': 'Child' },
+      title: { 'en-US': 'Child', 'sv-SE': 'Barn' },
     });
     const rootSource = getMockEntry('root-source', {
-      title: { 'en-US': 'Root' },
+      title: { 'en-US': 'Root', 'sv-SE': 'Rot' },
       child: {
         'en-US': {
           sys: { type: 'Link', linkType: 'Entry', id: 'child-source' },
@@ -74,10 +77,9 @@ describe('EntryCopier', () => {
       client: client as unknown as SpaceContext['client'],
     };
 
-    const copier = new EntryCopier(target, 'Copy', true, 1);
+    const copier = new EntryCopier(target, 'Copy', true, 1, 'overwrite', ['en-US']);
     const result = await copier.copyEntries(
       {
-        'child-source': childSource,
         'root-source': rootSource,
       },
       'root-source',
@@ -86,23 +88,32 @@ describe('EntryCopier', () => {
     );
 
     expect(result.rootEntry.sys.id).toBe('root-source');
-    expect(client.entry.createWithId).toHaveBeenCalledTimes(2);
-    expect(client.entry.update).toHaveBeenCalled();
-    expect(copier.getStrippedLinkCount()).toBe(0);
+    expect(client.entry.createWithId).toHaveBeenCalledTimes(1);
+    const createFields = client.entry.createWithId.mock.calls[0]?.[1].fields as {
+      title: Record<string, string>;
+    };
+    expect(createFields.title).toEqual({ 'en-US': 'Copy Root' });
+    expect(createFields.title).not.toHaveProperty('sv-SE');
+
+    const updateFields = client.entry.update.mock.calls[0]?.[1].fields as {
+      child: Record<string, { sys: { id: string } }>;
+      title: Record<string, string>;
+    };
+    expect(updateFields.child['en-US']?.sys.id).toBe('child-source');
+    expect(updateFields.title).toEqual({ 'en-US': 'Copy Root' });
   });
 
-  it('overwrites existing entries instead of creating duplicates', async () => {
-    const childSource = getMockEntry('child-source', {
-      title: { 'en-US': 'Child' },
-    });
+  it('merges selected locales into existing entries and preserves others', async () => {
     const rootSource = getMockEntry('root-source', {
-      title: { 'en-US': 'Root' },
+      title: { 'en-US': 'Root', 'sv-SE': 'Rot' },
     });
 
     const createdEntries: Record<string, ReturnType<typeof getMockEntry>> = {
-      'child-source': {
-        ...getMockEntry('child-source', { title: { 'en-US': 'Old child' } }),
-        sys: { ...getMockEntry('child-source', {}).sys, id: 'child-source', version: 3 },
+      'root-source': {
+        ...getMockEntry('root-source', {
+          title: { 'en-US': 'Old EN', 'sv-SE': 'Market SV' },
+        }),
+        sys: { ...getMockEntry('root-source', {}).sys, id: 'root-source', version: 3 },
       },
     };
     const client = buildEntryCopierClient(createdEntries);
@@ -113,10 +124,9 @@ describe('EntryCopier', () => {
       client: client as unknown as SpaceContext['client'],
     };
 
-    const copier = new EntryCopier(target, 'Copy', true, 1, 'overwrite');
+    const copier = new EntryCopier(target, 'Copy', true, 1, 'overwrite', ['en-US']);
     await copier.copyEntries(
       {
-        'child-source': childSource,
         'root-source': rootSource,
       },
       'root-source',
@@ -124,13 +134,14 @@ describe('EntryCopier', () => {
       {}
     );
 
-    expect(client.entry.createWithId).toHaveBeenCalledTimes(1);
-    expect(client.entry.createWithId).toHaveBeenCalledWith(
-      expect.objectContaining({ entryId: 'root-source' }),
-      expect.any(Object)
-    );
-    expect(client.entry.update).toHaveBeenCalled();
-    expect(copier.getSkippedEntryIds()).toEqual([]);
+    expect(client.entry.createWithId).not.toHaveBeenCalled();
+    const updateFields = client.entry.update.mock.calls[0]?.[1].fields as {
+      title: Record<string, string>;
+    };
+    expect(updateFields.title).toEqual({
+      'en-US': 'Copy Root',
+      'sv-SE': 'Market SV',
+    });
   });
 
   it('skips existing entries and leaves them unchanged', async () => {
@@ -155,7 +166,7 @@ describe('EntryCopier', () => {
       client: client as unknown as SpaceContext['client'],
     };
 
-    const copier = new EntryCopier(target, 'Copy', true, 1, 'skip');
+    const copier = new EntryCopier(target, 'Copy', true, 1, 'skip', ['en-US']);
     await copier.copyEntries(
       {
         'child-source': childSource,
@@ -171,16 +182,13 @@ describe('EntryCopier', () => {
     expect(createdEntries['child-source']?.fields.title?.['en-US']).toBe('Old child');
   });
 
-  it('creates entries when target lookup returns app adapter not-found code', async () => {
-    const childSource = getMockEntry('child-source', {
-      title: { 'en-US': 'Child' },
+  it('keeps original titles when clone text is empty', async () => {
+    const rootSource = getMockEntry('root-source', {
+      title: { 'en-US': 'Root' },
     });
 
     const createdEntries: Record<string, ReturnType<typeof getMockEntry>> = {};
     const client = buildEntryCopierClient(createdEntries);
-    client.entry.get = vi.fn(async () => {
-      throw { code: 'a', message: 'The resource could not be found.' };
-    });
 
     const target: SpaceContext = {
       spaceId: 'target-space',
@@ -188,17 +196,12 @@ describe('EntryCopier', () => {
       client: client as unknown as SpaceContext['client'],
     };
 
-    const copier = new EntryCopier(target, 'Copy', true, 1);
-    await copier.copyEntries(
-      {
-        'child-source': childSource,
-      },
-      'child-source',
-      {},
-      {}
-    );
+    const copier = new EntryCopier(target, '  ', true, 1, 'overwrite', ['en-US']);
+    await copier.copyEntries({ 'root-source': rootSource }, 'root-source', {}, {});
 
-    expect(client.entry.createWithId).toHaveBeenCalledTimes(1);
-    expect(copier.getCopyFailureMessages()).toEqual([]);
+    const createFields = client.entry.createWithId.mock.calls[0]?.[1].fields as {
+      title: Record<string, string>;
+    };
+    expect(createFields.title).toEqual({ 'en-US': 'Root' });
   });
 });
