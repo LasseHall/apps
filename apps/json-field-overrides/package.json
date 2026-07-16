@@ -1,0 +1,40 @@
+{
+  "name": "json-field-overrides",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@contentful/app-scripts": "^1.30.1",
+    "@contentful/app-sdk": "4.29.1",
+    "@contentful/f36-components": "4.67.0",
+    "@contentful/f36-icons": "4.29.0",
+    "@contentful/f36-tokens": "4.0.5",
+    "@contentful/react-apps-toolkit": "1.2.16",
+    "@emotion/css": "^11.13.0",
+    "react": "17.0.2",
+    "react-dom": "17.0.2",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.1"
+  },
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "test": "vitest",
+    "test:ci": "vitest run",
+    "create-app-definition": "contentful-app-scripts create-app-definition",
+    "upload": "contentful-app-scripts upload --bundle-dir ./build",
+    "upload:ci": "contentful-app-scripts upload --ci --bundle-dir ./build --organization-id ${CONTENTFUL_ORG_ID} --definition-id ${CONTENTFUL_APP_DEF_ID} --token ${CONTENTFUL_ACCESS_TOKEN}"
+  },
+  "browserslist": {
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+  },
+  "devDependencies": {
+    "@types/node": "18.11.5",
+    "@types/react": "18.0.9",
+    "@types/react-dom": "18.0.3",
+    "@vitejs/plugin-react": "^4.3.2",
+    "jsdom": "^25.0.1",
+    "typescript": "4.8.4"
+  },
+  "homepage": "."
+}
